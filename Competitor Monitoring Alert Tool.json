@@ -1,0 +1,963 @@
+{
+  "name": "Competitor Monitoring Alert Tool.",
+  "nodes": [
+    {
+      "parameters": {
+        "formTitle": "Competitor Monitoring Tool",
+        "formDescription": "Enter a competitor domain and your email. We'll monitor pricing and new content, then notify you by email when changes are detected.",
+        "formFields": {
+          "values": [
+            {
+              "fieldLabel": "domain",
+              "placeholder": "ahrefs.com",
+              "requiredField": true
+            },
+            {
+              "fieldLabel": "email",
+              "fieldType": "email",
+              "placeholder": "you@example.com",
+              "requiredField": true
+            }
+          ]
+        },
+        "responseMode": "lastNode",
+        "options": {
+          "respondWithOptions": {
+            "values": {
+              "formSubmittedText": "✅ Monitoring Run Completed!  Your competitor monitoring workflow has finished processing your request.  📩 Check your email for pricing change alerts and newly published blog posts. "
+            }
+          }
+        }
+      },
+      "id": "250a837f-5412-4b16-8d95-bebb54821f67",
+      "name": "On form submission",
+      "type": "n8n-nodes-base.formTrigger",
+      "typeVersion": 2.6,
+      "position": [
+        -512,
+        -208
+      ],
+      "webhookId": "14ea0162-d5b2-4aea-8e22-bb9f727d8efd"
+    },
+    {
+      "parameters": {
+        "jsCode": "const xml = String($input.first().json.data || '');\nconst domain = $('On form submission').first().json.domain;\nconst headers = { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0 Safari/537.36' };\nconst base = `https://${domain}`;\nconst debug = [];\nconst e0 = $input.first().json.error;\nif (e0) debug.push('sitemap -> ' + String(e0.message || e0).slice(0, 80));\n\nconst get = async (url) => {\n  try { return String(await this.helpers.httpRequest({ url, headers })); }\n  catch (e) { debug.push(url + ' -> ' + String(e.message).slice(0, 80)); return ''; }\n};\nconst getLocs = (x) =>\n  [...x.matchAll(/<loc>\\s*(?:<!\\[CDATA\\[)?\\s*(.*?)\\s*(?:\\]\\]>)?\\s*<\\/loc>/g)].map(m => m[1]);\nconst isPost = (u) =>\n  /\\/(blog|blogs|post|posts|article|articles|learn|news|resources)\\/[^/?#]+-[^/?#]+/i.test(u) &&\n  !/\\/(tag|tags|category|author|page)\\//i.test(u);\n\nlet posts = [];\n\n// Method 1: sitemap\nlet urls = getLocs(xml);\nif (urls.some(u => u.includes('.xml'))) {\n  const subs = urls.filter(u => u.includes('.xml') && /blog|post|article|news/i.test(u)).slice(0, 3);\n  urls = urls.filter(u => !u.includes('.xml'));\n  for (const s of subs) urls.push(...getLocs(await get(s)));\n}\nposts = urls.filter(isPost);\n\n// Method 2: links on the blog page\nif (posts.length < 3) {\n  const html = await get(`${base}/blog`);\n  const links = [...html.matchAll(/href=\"([^\"#]+)\"/g)]\n    .map(m => { try { return new URL(m[1], base).href; } catch (e) { return null; } })\n    .filter(u => u && u.includes(domain) && isPost(u));\n  posts.push(...links);\n}\n\n// Method 3: RSS feed\nif (posts.length < 3) {\n  const feeds = ['/feed', '/feed.xml', '/rss.xml', '/rss', '/blog/feed', '/blog/rss.xml', '/blog/feed.xml', '/blog/feeder/'];\n  for (const f of feeds) {\n    const text = await get(base + f);\n    if (!/<item>|<entry>/.test(text)) continue;\n    const blocks = [...text.matchAll(/<item>([\\s\\S]*?)<\\/item>|<entry>([\\s\\S]*?)<\\/entry>/g)].map(m => m[1] || m[2]);\n    const links = blocks.map(b =>\n      (b.match(/<link>\\s*(?:<!\\[CDATA\\[)?\\s*(https?:[^<\\s\\]]+)/) || b.match(/<link[^>]+href=\"([^\"]+)\"/) || [])[1]\n    ).filter(Boolean);\n    if (links.length) { posts.push(...links); break; }\n  }\n}\n\nposts = [...new Set(posts)].slice(0, 15);\n\nif (posts.length === 0) {\n  return [{ json: { error: 'NO_POSTS_FOUND', domain, sitemapUrls: urls.length, debug: debug.join(' | ') } }];\n}\nreturn posts.map(u => ({ json: { url: u, domain } }));"
+      },
+      "id": "65334be5-f437-45b7-b3cd-5ffd36a518e3",
+      "name": "Get post URLs",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        64,
+        64
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const txt = (v) => {\n  if (Array.isArray(v)) v = v[0];\n  if (v && typeof v === 'object') v = v.content ?? v.value ?? '';\n  return String(v ?? '').trim();\n};\n\nreturn $input.all().map((item) => {\n  const j = item.json;\n  const ldDate = (String(txt(j.ld)).match(/\"datePublished\"\\s*:\\s*\"([^\"]+)\"/) || [])[1];\n  return {\n    json: {\n      title: txt(j.title),\n      description: txt(j.description),\n      date: txt(j.date) || txt(j.date2) || ldDate || '',\n      url: $('Get post URLs').all()[item.pairedItem.item].json.url,\n      domain: $('On form submission').first().json.domain,\n    }\n  };\n});"
+      },
+      "id": "e5a5c4bc-7299-4292-bcd1-2b692a3cbaa1",
+      "name": "Merge details",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1296,
+        32
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "value": "JqH9A2Fqs9WeXT5P",
+          "mode": "list",
+          "cachedResultName": "seen_posts",
+          "cachedResultUrl": "/projects/eoLv0HPC76XA57Xp/datatables/JqH9A2Fqs9WeXT5P"
+        },
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "domain",
+              "keyValue": "={{ $('On form submission').first().json.domain }}"
+            }
+          ]
+        },
+        "returnAll": true
+      },
+      "id": "01465bf2-2325-453e-a2a7-61da980d88c8",
+      "name": "Get saved rows",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        1488,
+        32
+      ],
+      "executeOnce": true,
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "jsCode": "const saved = new Set(\n  $('Get saved rows').all().map(i => i.json.url).filter(Boolean)\n);\n\nconst posts = $('Merge details').all().map(i => i.json);\nconst fresh = posts.filter(p => p.url && !saved.has(p.url));\n\nreturn fresh.map(p => ({ json: p }));"
+      },
+      "id": "e1f65493-02cf-4f99-ba53-df9da972ae53",
+      "name": "Keep only new",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1696,
+        32
+      ],
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "dataTableId": {
+          "__rl": true,
+          "value": "JqH9A2Fqs9WeXT5P",
+          "mode": "list",
+          "cachedResultName": "seen_posts",
+          "cachedResultUrl": "/projects/eoLv0HPC76XA57Xp/datatables/JqH9A2Fqs9WeXT5P"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "domain",
+              "displayName": "domain",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "url",
+              "displayName": "url",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "title",
+              "displayName": "title",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "description",
+              "displayName": "description",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "date",
+              "displayName": "date",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "id": "003a1c1f-c104-4a56-bd06-29c2f91f44e9",
+      "name": "Save new rows",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        2112,
+        -80
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const clean = t => {\n  let k = String(t || '').split('|')[0]\n    .replace(/\\[?\\b20\\d\\d\\b\\]?/g, '')\n    .replace(/[?:!,.()]/g, ' ')\n    .toLowerCase()\n    .replace(/^(the|a|an)\\s+/, '')\n    .replace(/^\\d+\\s+/, '')\n    .replace(/^the\\s+/, '')\n    .trim();\n  let words = k.split(/\\s+/).slice(0, 5);\n  while (words.length > 2 && /^(in|for|on|of|to|and|vs|with|a|the|is|are|which)$/.test(words[words.length - 1])) words.pop();\n  return words.join(' ');\n};\n\nconst posts = $('Keep only new').all().map(i => ({ ...i.json, keyword: clean(i.json.title) }));\nreturn [{ json: { posts } }];"
+      },
+      "id": "5fb8ae6b-c5a2-4c05-865d-0d508c1a82ae",
+      "name": "Make Keywords",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2336,
+        16
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const posts = $('Make Keywords').first().json.posts;\nconst domain = posts[0].domain;\n\nconst vol = {};\nlet anyVolume = false;\ntry {\n  for (const r of $('Get search volume').all()) {\n    const j = r.json;\n    if (!j.keyword) continue;\n    let text = null;\n    if (j.estimatedMonthlySearches != null) {\n      text = `~${j.estimatedMonthlySearches}/month (est.)`;\n    } else if (j.estimatedRange && j.estimatedRange.high) {\n      text = `~${j.estimatedRange.low}-${j.estimatedRange.high}/month (est.)`;\n    }\n    if (text) { vol[String(j.keyword).toLowerCase()] = text; anyVolume = true; }\n  }\n} catch (e) {}\n\nconst lines = posts.map((p, i) => {\n  const v = vol[p.keyword.toLowerCase()];\n  return `${i + 1}. ${p.title}\\n${p.url}\\nKeyword: ${p.keyword}` + (v ? ` | Est. volume: ${v}` : '');\n});\n\nconst note = anyVolume\n  ? ''\n  : '\\n\\n(Search volume estimates were unavailable for this run.)';\n\nreturn [{ json: {\n  subject: `${domain}: ${posts.length} new posts`,\n  text: `${domain} published ${posts.length} new post(s):\\n\\n` + lines.join('\\n\\n') + note\n}}];"
+      },
+      "id": "378698de-f845-4b21-9f9e-eca882caec8c",
+      "name": "Build Alert",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2544,
+        16
+      ]
+    },
+    {
+      "parameters": {
+        "url": "=https://{{ $json.domain }}/pricing",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "User-Agent"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "text"
+            }
+          }
+        }
+      },
+      "id": "8fecb9ca-57a4-4721-be18-6b434dbc7183",
+      "name": "Get pricing page",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        -96,
+        -512
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "value": "Zba8j7l7xv6ha9Ud",
+          "mode": "list",
+          "cachedResultName": "pricing_snapshots",
+          "cachedResultUrl": "/projects/eoLv0HPC76XA57Xp/datatables/Zba8j7l7xv6ha9Ud"
+        },
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "domain",
+              "keyValue": "={{ $('On form submission').first().json.domain }}"
+            }
+          ]
+        }
+      },
+      "id": "3ad54053-eb42-45e9-84c8-1a36fe0727f5",
+      "name": "Get last pricing",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        112,
+        -512
+      ],
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "jsCode": "const domain = $('On form submission').first().json.domain;\nconst html = String($('Get pricing page').first().json.data || '');\nconst oldPrices = $('Get last pricing').first().json.prices || '';\n\nconst text = html\n  .replace(/<script[\\s\\S]*?<\\/script>|<style[\\s\\S]*?<\\/style>/gi, ' ')\n  .replace(/<[^>]+>/g, ' ');\n\n// find each price plus the few words just before it\nconst re = /\\$\\s?\\d[\\d,]*(?:\\.\\d+)?/g;\nconst ctx = {};\nlet m;\nwhile ((m = re.exec(text)) !== null) {\n  const p = m[0].replace(/\\s/g, '');\n  if (p === '$0' || p in ctx) continue;\n  ctx[p] = text.slice(Math.max(0, m.index - 60), m.index)\n    .replace(/\\s+/g, ' ').trim().split(' ').slice(-4).join(' ');\n}\nconst prices = Object.keys(ctx).slice(0, 30).join(' | ');\n\nconst oldList = oldPrices ? oldPrices.split(' | ') : [];\nconst newList = prices ? prices.split(' | ') : [];\nconst added = newList.filter(p => !oldList.includes(p));\nconst removed = oldList.filter(p => !newList.includes(p));\n\nlet status = 'unchanged';\nif (!prices) status = 'unavailable';\nelse if (!oldPrices) status = 'first_check';\nelse if (added.length || removed.length) status = 'changed';\n\nconst messages = {\n  changed: [\n    `${domain}: pricing changed`,\n    `Pricing changed on ${domain}/pricing\\n\\n` +\n    `New: ${added.map(p => ctx[p] ? `${p} (near: \"${ctx[p]}\")` : p).join(', ') || 'none'}\\n` +\n    `Removed: ${removed.join(', ') || 'none'}\\n\\n` +\n    `All prices now: ${prices}`\n  ],\n  first_check: [`${domain}: pricing baseline saved`, `Saved the first pricing snapshot for ${domain}: ${prices}`],\n  unchanged:   [`${domain}: no pricing changes`, `No pricing changes detected on ${domain}/pricing.`],\n  unavailable: [`${domain}: pricing unavailable`, `Could not read prices on ${domain}/pricing. The page may not exist, may block scrapers, or may load prices with JavaScript.`]\n};\n\nreturn [{ json: {\n  domain,\n  prices: status === 'unavailable' ? oldPrices : prices,\n  status,\n  subject: messages[status][0],\n  text: messages[status][1]\n}}];"
+      },
+      "id": "6c80ddad-7189-4767-9d06-c7e1aed6ef6a",
+      "name": "Check pricing",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        304,
+        -512
+      ]
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $('On form submission').first().json.email }}",
+        "subject": "={{ $json.domain }}: could not read blog",
+        "message": "={{ $json.debug && $json.debug.includes('403') ? 'Site blocked our scraper (403).' : 'No blog posts were found for this domain.' }} Details: {{ $json.debug }}",
+        "options": {}
+      },
+      "id": "335d0ce2-e334-4d47-8f81-d356fe39ae93",
+      "name": "Send Error Alert",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        544,
+        48
+      ],
+      "webhookId": "22ea1c76-8621-4145-8b15-5d1bde9b438e",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "k0CKsOVPkCt0f9bb",
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "=https://{{ $json.domain }}/sitemap.xml",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "User-Agent",
+              "value": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0 Safari/537.36"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "text"
+            }
+          }
+        }
+      },
+      "id": "d754c3c6-838a-4d50-bf62-511042581f47",
+      "name": "Fetch sitemap",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        -128,
+        64
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "url": "={{ $json.url }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "User-Agent"
+            }
+          ]
+        },
+        "options": {
+          "batching": {
+            "batch": {
+              "batchSize": 3
+            }
+          },
+          "response": {
+            "response": {
+              "responseFormat": "text"
+            }
+          }
+        }
+      },
+      "id": "0c2f9e08-c0c1-4d63-b1dc-e7c6d0e767e0",
+      "name": "Fetch each post",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        800,
+        80
+      ],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "operation": "extractHtmlContent",
+        "extractionValues": {
+          "values": [
+            {
+              "key": "title",
+              "cssSelector": "title"
+            },
+            {
+              "key": "description",
+              "cssSelector": "meta[name=\"description\"]",
+              "returnValue": "attribute"
+            },
+            {
+              "key": "date",
+              "cssSelector": "meta[property=\"article:published_time\"]",
+              "returnValue": "attribute"
+            },
+            {
+              "key": "ld",
+              "cssSelector": "=script[type=\"application/ld+json\"]"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "fb8f4132-277b-474d-ab1c-ac4020d719a9",
+      "name": "Extract title, description, date",
+      "type": "n8n-nodes-base.html",
+      "typeVersion": 1.2,
+      "position": [
+        1072,
+        32
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "upsert",
+        "dataTableId": {
+          "__rl": true,
+          "value": "Zba8j7l7xv6ha9Ud",
+          "mode": "list",
+          "cachedResultName": "pricing_snapshots",
+          "cachedResultUrl": "/projects/eoLv0HPC76XA57Xp/datatables/Zba8j7l7xv6ha9Ud"
+        },
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "domain",
+              "keyValue": "={{ $json.domain }}"
+            }
+          ]
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "domain": "={{ $json.domain }}",
+            "prices": "={{ $json.prices }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "domain",
+              "displayName": "domain",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "prices",
+              "displayName": "prices",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "id": "c47335ed-f858-4ac8-9281-a9eca57a89b6",
+      "name": "Save pricing snapshot",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        496,
+        -512
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 4
+          },
+          "conditions": [
+            {
+              "id": "f7853b4d-c0b8-4a5a-8111-3cc60e4c11f9",
+              "leftValue": "={{ $('Check pricing').first().json.status }}",
+              "rightValue": "changed",
+              "operator": {
+                "type": "string",
+                "operation": "equals",
+                "name": "filter.operator.equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "f360139e-dc9f-4700-a61b-92b1ea1bee27",
+      "name": "Pricing changed ?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.4,
+      "position": [
+        688,
+        -512
+      ]
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $('On form submission').first().json.email }}",
+        "subject": "={{ $('Check pricing').first().json.subject }}",
+        "emailType": "text",
+        "message": "={{ $('Check pricing').first().json.text }}",
+        "options": {}
+      },
+      "id": "92fac047-ad55-4949-a2ea-e4ff0072e4d1",
+      "name": "Send pricing alert",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        912,
+        -512
+      ],
+      "webhookId": "40d2ccaf-20ef-4d7b-a3ab-a06f5606475d",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "k0CKsOVPkCt0f9bb",
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $('On form submission').first().json.email }}",
+        "subject": "={{ $json.subject }}",
+        "emailType": "text",
+        "message": "={{ $json.text }}",
+        "options": {}
+      },
+      "id": "34d7ec4e-58aa-4f0f-a6f9-425e61124411",
+      "name": "Send new posts alert",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        2736,
+        16
+      ],
+      "webhookId": "33beb841-1773-4f09-832f-c0dc805b277e",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "k0CKsOVPkCt0f9bb",
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## Pricing Monitor\n",
+        "height": 416,
+        "width": 1280,
+        "color": 5
+      },
+      "id": "ca5b8b95-0a3a-4485-aac5-24ec8a6055e0",
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -176,
+        -688
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## Content Monitor ",
+        "height": 448,
+        "width": 3172,
+        "color": 5
+      },
+      "id": "7472145f-f476-4a9f-8db8-d55fb3acf8e8",
+      "name": "Sticky Note1",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -176,
+        -192
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 4
+          },
+          "conditions": [
+            {
+              "id": "02f4aa0f-6086-4083-82ca-fe74abce2d8d",
+              "leftValue": "={{ $json.url }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "7927bd73-7134-4b8b-960f-a7940175860a",
+      "name": "If",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.4,
+      "position": [
+        1888,
+        32
+      ]
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $('On form submission').first().json.email }}",
+        "subject": "={{ $('On form submission').first().json.domain }}: no new posts since last check",
+        "message": "=No new posts on {{ $('On form submission').first().json.domain }} since the last check.\n\nPosts checked: {{ $('Merge details').all().length }}\nChecked at: {{ $now.toFormat('dd LLL yyyy, HH:mm') }}",
+        "options": {}
+      },
+      "id": "979334d0-d8ac-408c-a80f-180deeee6bc2",
+      "name": "Send no-new-posts alert",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        2112,
+        80
+      ],
+      "webhookId": "ba4284c0-ac34-4a7a-bf8a-3e81a2e2604f",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "k0CKsOVPkCt0f9bb",
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 4
+          },
+          "conditions": [
+            {
+              "id": "accf1d75-8aa7-4222-9b16-cbd005bc7587",
+              "leftValue": "={{ $json.error }}",
+              "rightValue": "NO_POSTS_FOUND",
+              "operator": {
+                "type": "string",
+                "operation": "equals",
+                "name": "filter.operator.equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "id": "389b418f-7d6f-4aa8-a832-f2e672967291",
+      "name": "No blog found ?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.4,
+      "position": [
+        256,
+        64
+      ]
+    },
+    {
+      "parameters": {
+        "content": "\nReads pricing, compares to the last saved snapshot, and emails only if prices changed.",
+        "height": 80,
+        "width": 416
+      },
+      "id": "e4e5cea2-5ce1-47d6-b913-362d4fcb8756",
+      "name": "Sticky Note2",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -160,
+        -640
+      ]
+    },
+    {
+      "parameters": {
+        "content": "**Content Monitor**\n1. Scrape: sitemap , blog page \n2. Extract title, date, description\n3. Compare with saved URLs → keep only NEW posts\n4. Add target keyword → one summary email",
+        "width": 560
+      },
+      "id": "ff2cafcc-f545-405a-8590-ce238eff268c",
+      "name": "Sticky Note3",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -160,
+        -144
+      ]
+    },
+    {
+      "parameters": {
+        "content": "# Competitor Monitoring Alert Tool\nEnter a competitor domain + your email → the tool scrapes their blog, detects NEW posts, tracks pricing changes, and emails you an alert.",
+        "width": 720
+      },
+      "id": "499a7cca-f84d-4fc9-bfab-ecd77743e4ff",
+      "name": "Sticky Note4",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        160,
+        -912
+      ]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "On form submission": {
+      "main": [
+        [
+          {
+            "node": "Fetch sitemap",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Get pricing page",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get post URLs": {
+      "main": [
+        [
+          {
+            "node": "No blog found ?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge details": {
+      "main": [
+        [
+          {
+            "node": "Get saved rows",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get saved rows": {
+      "main": [
+        [
+          {
+            "node": "Keep only new",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Keep only new": {
+      "main": [
+        [
+          {
+            "node": "If",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save new rows": {
+      "main": [
+        [
+          {
+            "node": "Make Keywords",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Make Keywords": {
+      "main": [
+        [
+          {
+            "node": "Build Alert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Alert": {
+      "main": [
+        [
+          {
+            "node": "Send new posts alert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get pricing page": {
+      "main": [
+        [
+          {
+            "node": "Get last pricing",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get last pricing": {
+      "main": [
+        [
+          {
+            "node": "Check pricing",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check pricing": {
+      "main": [
+        [
+          {
+            "node": "Save pricing snapshot",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch sitemap": {
+      "main": [
+        [
+          {
+            "node": "Get post URLs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch each post": {
+      "main": [
+        [
+          {
+            "node": "Extract title, description, date",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract title, description, date": {
+      "main": [
+        [
+          {
+            "node": "Merge details",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save pricing snapshot": {
+      "main": [
+        [
+          {
+            "node": "Pricing changed ?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Pricing changed ?": {
+      "main": [
+        [
+          {
+            "node": "Send pricing alert",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Send pricing alert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If": {
+      "main": [
+        [
+          {
+            "node": "Save new rows",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Send no-new-posts alert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "No blog found ?": {
+      "main": [
+        [
+          {
+            "node": "Send Error Alert",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Fetch each post",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "031130ec-eada-4de9-a3f6-cac07c2cddcd",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "63b9c585205cfba5e421cd4512fd4e5bd26430fec2438a7639d463a77fdd7a50"
+  },
+  "nodeGroups": [],
+  "id": "u5oHo4d0OES8uhMi",
+  "tags": []
+}
