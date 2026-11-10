@@ -2,12 +2,6 @@
 
 An automated competitor monitoring tool built with **n8n Cloud** that tracks competitor pricing and discovers newly published blog posts, sending email alerts when relevant changes are detected.
 
-## Live Demo
-
-**Try the tool:** https://parthgairola5.app.n8n.cloud/form/14ea0162-d5b2-4aea-8e22-bb9f727d8efd
-
-Enter a competitor domain and your email address to run the monitoring workflow.
-
 ## Workflow Overview
 
 <!-- Add your full workflow screenshot below this line -->
